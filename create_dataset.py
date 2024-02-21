@@ -58,18 +58,26 @@ if __name__ == '__main__':
     test_data = CustomImageDataset(test_labels, img_dir, transform=transform, target_transform=target_transform)
     validation_data = CustomImageDataset(val_labels, img_dir, transform=transform, target_transform=target_transform)
 
-    train_dataloader = DataLoader(training_data, batch_size=8, shuffle=True)
-    test_dataloader = DataLoader(test_data, batch_size=8, shuffle=True)
-    validation_dataloader = DataLoader(validation_data, batch_size=8, shuffle=True)
+    train_dataloader = DataLoader(training_data, batch_size=16, shuffle=True)
+    test_dataloader = DataLoader(test_data, batch_size=16, shuffle=True)
+    validation_dataloader = DataLoader(validation_data, batch_size=16, shuffle=True)
 
     # Display an image and label
     train_features, train_labels = next(iter(train_dataloader))
     print(f"Feature batch shape: {train_features.size()}")
     print(f"Labels batch shape: {train_labels.size()}")
     img = train_features[0].squeeze()
-    label = train_labels[0]
+    # reshape image to so first dimension becomes third
+    img = img.permute(1, 2, 0)
+    img = img * 255    
+    img = img.numpy().astype('uint8')
+    # convert to unint8
+    #img = img.astype('uint8')
     plt.imshow(img, cmap="gray")
+    plt.imshow(img)
     plt.show()
+
+    label = train_labels[0]
     print(f"Label: {label}")
 
     pass
