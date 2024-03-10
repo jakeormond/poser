@@ -37,22 +37,25 @@ def label_frames(dir=None, body_parts=None):
         # make a list of body parts to label on the animal
         body_parts = ['dot1', 'dot2', 'dot3', 'dot4', 'shoulder', 'spot1', 'spot2', 'tail_base']
 
-    # make a new directory to store the labeled frames
-    if not os.path.exists(os.path.join(dir, 'labeled_frames')):
-        os.makedirs(os.path.join(dir, 'labeled_frames'))
-        
+    # create a dataframe to store the coordinates of the body parts
+    # the first column will be the frame name, and the remaining columns will be the coordinates of the body parts
+    df = pd.DataFrame(columns=['frame'] + [item for sublist in [[part + '_x', part + '_y'] for part in body_parts] for item in sublist])
+            
     # find the png files
     frame_names = [f for f in os.listdir(dir) if f.endswith('.png')]
     # create the full paths to the frames
     frames = [os.path.join(dir, f) for f in frame_names]
 
-    # create an empty array that has the same number of rows as the number of frames, 
-    # and the same number of columns as twice the number of body parts (for x and y 
-    # coordinates); this will be used to store the coordinates of the body parts
-    coordinates = np.zeros((len(frames), len(body_parts)*2))
-
     # loop through each frame
-    for frame in frames:
+    for i, frame in enumerate(frames):
+
+        # enter the frame_name in the dataframe if it's not already there
+        if frame_names[i] not in df['frame'].values:
+            df = df.append({'frame': frame_names[i]}, ignore_index=True)
+
+        # get the index of the frame in the dataframe
+        frame_index = df[df['frame'] == frame_names[i]].index[0]
+
         # display the frame in a window
         img = cv2.imread(frame)
 
@@ -152,8 +155,9 @@ def label_frames(dir=None, body_parts=None):
     df.to_csv(csv_file, index=False)
 
 if __name__ == '__main__':
-
-    label_frames()
+    video_dir = '/media/jake/LaCie/video_files'
+    body_parts = ['dot1', 'dot2', 'dot3', 'dot4', 'shoulder', 'spot1', 'spot2', 'tail_base']
+    label_frames(dir=video_dir, body_parts=body_parts)
     pass        
         
 
