@@ -244,9 +244,6 @@ def save_labelled_frames(dir):
         # save the image
         cv2.imwrite(labelled_frame_path, img)
 
-
-
-
     pass
 
 if __name__ == '__main__':
