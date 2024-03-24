@@ -13,11 +13,11 @@ colormap = plt.get_cmap('viridis')
 
 # This function will be called whenever the mouse is right-clicked
 def draw_circle(event, x, y, flags, param):
-    img = param  # Get the image from the parameters
+    img = param[0]  # Get the image from the parameters
     if event == cv2.EVENT_LBUTTONUP:
         # Draw a circle where the user clicked
         cv2.circle(img, (x, y), 5, (255, 0, 0), -1)
-        cv2.imshow('image', img)  # Update the image
+        cv2.imshow(param[1], img)  # Update the image
 
         # Store the coordinates
         coords.append((x, y))
@@ -30,7 +30,15 @@ def scale_image(img, scale_factor):
     return img
 
 
-def label_frames(dir=None, body_parts=None):
+def get_body_parts_from_df(df):
+    # get list of body parts
+    col_names = df.columns[1::2]
+    # remove the _x suffix
+    body_parts = [col.split('_')[0] for col in col_names]
+    return body_parts
+
+
+def label_frames(frame_names=None, dir=None, body_parts=None, relabel=False, scale_factor=2):
 
     if dir == None:
         dir = '/media/jake/LaCie/2023-05-03/videos/extracted_frames'
@@ -50,25 +58,24 @@ def label_frames(dir=None, body_parts=None):
         # load the csv file
         df = pd.read_csv(csv_file)
        
-        # get the list of frames from the dataframe
-        frame_names = df['frame'].values
 
-        # get the list of body parts from the dataframe
-        body_parts_xy = df.columns[1:]
+        if frame_names == None:
+            # get the list of frames from the dataframe
+            frame_names = df['frame'].values
 
-        # get the list of unique body parts, which have the _x or _y 
-        # suffix removed
-        body_parts = list(set([part.split('_')[0] for part in body_parts_xy]))
+        if body_parts == None:
+            # get the list of body parts from the dataframe
+            body_parts = get_body_parts_from_df(df)
 
     else: 
         # create and save the csv file
         if body_parts == None:
             # make a list of body parts to label on the animal
             body_parts = ['dot1', 'dot2', 'dot3', 'dot4', 'shoulder', 'spot1', 'spot2', 'tailbase']
-            body_parts_xy = [item for sublist in [[part + '_x', part + '_y'] for part in body_parts] for item in sublist]
                 
-        # find the png files
-        frame_names = [f for f in os.listdir(dir) if f.endswith('.png')]      
+        if frame_names == None:
+            # find the png files
+            frame_names = [f for f in os.listdir(dir) if f.endswith('.png')]      
 
         # create a dataframe to store the coordinates of the body parts
         # the first column will be the frame name, and the remaining columns 
@@ -87,37 +94,38 @@ def label_frames(dir=None, body_parts=None):
 
     # loop through each frame, labelling each one
     # get the list of frames from the dataframe
-    frame_names = df['frame'].values
+    # frame_names = df['frame'].values
         
-    for i, frame in enumerate(frame_names):
-
-        # check if there are any non-NaN values in the body part columns
-        # if there are, skip the frame
-        if not df.iloc[i, 1:].isnull().all():
-            continue
-
-        # create the full path to the frames
-        frame_path = os.path.join(dir, frame)
-
+    for frame in frame_names:
 
         # get the index of the frame in the dataframe
         frame_index = df[df['frame'] == frame].index[0]
+
+        if relabel==False:
+            # check if there are any non-NaN values in the body part columns
+            # if there are, skip the frame
+            if not df.iloc[frame_index, 1:].isnull().all():
+                continue
+
+        # create the full path to the frames
+        frame_path = os.path.join(dir, frame)
 
         # display the frame in a window
         img = cv2.imread(frame_path)
 
         # Scale the image
-        scale_factor = 2
-        img = scale_image(img, scale_factor)
+        # scale_factor = 2
+        if scale_factor != 1:
+            img = scale_image(img, scale_factor)
         
         # Create a named window
-        cv2.namedWindow('image')
+        cv2.namedWindow(frame)
 
         # Bind the function to window
-        cv2.setMouseCallback('image', draw_circle, img)   
+        cv2.setMouseCallback(frame, draw_circle, param=(img, frame))   
 
         # Display the image
-        cv2.imshow('image', img)
+        cv2.imshow(frame, img)
 
         # loop through each body part
         n_body_parts = len(body_parts)
@@ -128,7 +136,7 @@ def label_frames(dir=None, body_parts=None):
 
             # prompt the user to click on the body part
             message = 'Click on the ' + body_part + ' of the animal'
-            cv2.displayOverlay('image', message, 10000)  # Display the message for 10 seconds
+            cv2.displayOverlay(frame, message, 10000)  # Display the message for 10 seconds
 
             # Clear the coordinates
             coords.clear()        
@@ -150,9 +158,10 @@ def label_frames(dir=None, body_parts=None):
 
                     # Display the image
                     img = cv2.imread(frame_path)
-                    img = scale_image(img, scale_factor)
-                    cv2.setMouseCallback('image', draw_circle, img)   
-                    cv2.imshow('image', img)
+                    if scale_factor != 1:
+                        img = scale_image(img, scale_factor)
+                    cv2.setMouseCallback(frame, draw_circle, param=(img, frame))   
+                    cv2.imshow(frame, img)
 
                     # redraw the circles from 0 to i
                     for j2 in range(j):
@@ -160,13 +169,15 @@ def label_frames(dir=None, body_parts=None):
                         column_name_y = body_parts[j2] + '_y'
 
                         # x is value in df at frame_index, column_name_x
-                        x = (df.loc[frame_index, column_name_x] * scale_factor).astype(int)
-                        y = (df.loc[frame_index, column_name_y] * scale_factor).astype(int)
+                        if not np.isnan(df.loc[frame_index, column_name_x]):
+                            x = (df.loc[frame_index, column_name_x] * scale_factor).astype(int)
+                            y = (df.loc[frame_index, column_name_y] * scale_factor).astype(int)
 
-                        # get color
-                        color_temp = (np.array(color_list[j][:-1]) * 255).astype(int)[::-1]
-                        cv2.circle(img, (x, y), 5, color_temp.tolist(), -1)
-                        cv2.imshow('image', img)        
+                            # get color
+                            color_temp = (np.array(color_list[j2][:-1]) * 255).astype(int)[::-1]
+                            cv2.circle(img, (x, y), 5, color_temp.tolist(), -1)
+                        
+                        cv2.imshow(frame, img)        
                     
                     break
 
@@ -192,17 +203,50 @@ def label_frames(dir=None, body_parts=None):
         df.to_csv(csv_file, index=False)
 
 
-    # Close all windows
-    cv2.destroyAllWindows()
+        # Close all windows
+        cv2.destroyAllWindows()
 
     return df
+
+def remove_frames(frame_names=None, dir=None):
+    
+    if dir == None:
+        dir = '/media/jake/LaCie/2023-05-03/videos'
+    
+    # extracted frames dir
+    extracted_frames_dir = os.path.join(dir, 'extracted_frames')
+    
+    # labelled frames dir
+    labelled_frames_dir = os.path.join(dir, 'labelled_frames')
+
+    csv_file = os.path.join(labelled_frames_dir, 'coordinates.csv')
+    # load the csv file
+    df = pd.read_csv(csv_file)
+
+    for frame in frame_names:
+        # get the index of the frame in the dataframe
+        frame_index = df[df['frame'] == frame].index[0]
+
+        # remove that row from the dataframe
+        df.drop(frame_index, inplace=True)
+
+        # delete the png file from extracted_frames_dir
+        frame_path = os.path.join(extracted_frames_dir, frame)
+        os.remove(frame_path)
+
+    # re-save the dataframe
+    df.to_csv(csv_file, index=False)
+    
+    return df
+
+
 
 def save_labelled_frames(dir):
     csv_file = os.path.join(dir, 'coordinates.csv')
     df = pd.read_csv(csv_file)
 
     # get list of body parts
-    body_parts = list(set([part.split('_')[0] for part in df.columns[1:]]))
+    body_parts = get_body_parts_from_df(df)
 
     # get color list correspoding to each body part
     color_list_len = len(body_parts)
@@ -220,8 +264,18 @@ def save_labelled_frames(dir):
 
     # loop through the rows of df
     for i, row in df.iterrows():
+        # get values in row series
+        values = row.dropna().values[1:]
+        # if all values are NaN, skip the row
+        if len(values) == 0:
+            continue        
+
         frame = row['frame']
         labelled_frame_path = os.path.join(dir, frame)
+        # if labelled frame is already in the path, skip the frame
+        if os.path.exists(labelled_frame_path):
+            continue
+
         unlabelled_frame_path = os.path.join(extracted_frames_dir, frame)
 
         # display the frame in a window
@@ -247,14 +301,28 @@ def save_labelled_frames(dir):
     pass
 
 if __name__ == '__main__':
-    video_dir = '/media/jake/LaCie/video_files/extracted_frames'
+    video_dir = '/media/jake/LaCie/video_files'
+    extracted_frames_dir = os.path.join(video_dir, 'extracted_frames')
+    labelled_frames_dir = os.path.join(video_dir, 'labelled_frames')
     body_parts = ['dot1', 'dot2', 'dot3', 'dot4', 'shoulder', 'spot1', 'spot2', 'tailbase']
-    # df = label_frames(dir=video_dir, body_parts=body_parts)
 
-    parent_dir = os.path.dirname(video_dir)
-    labelled_frames_dir = os.path.join(parent_dir, 'labelled_frames')
-    csv_file = os.path.join(labelled_frames_dir, 'coordinates.csv')
-    df = pd.read_csv(csv_file)
+    # load the csv file
+    # csv_file = os.path.join(labelled_frames_dir, 'coordinates.csv')
+    # df = pd.read_csv(csv_file)
+    # frame_names=['video_2024-02-17_10.16.56_frame_1539.png']
+    # null_frames=['video_2024-02-17_10.03.41_frame_0.png']
+    
+    # remove_frames(frame_names=null_frames, dir=video_dir)
+    
+    frames = ['video_2024-02-17_09.38.45_frame_852.png']
+    # df = label_frames(frame_names=frames, dir=extracted_frames_dir, 
+    #                 body_parts=body_parts, relabel=True, scale_factor=1.8)
+
+    df = label_frames(dir=extracted_frames_dir, body_parts=body_parts, scale_factor=1.8)
+
+
+    # csv_file = os.path.join(labelled_frames_dir, 'coordinates.csv')
+    # df = pd.read_csv(csv_file)
 
     save_labelled_frames(labelled_frames_dir)
 
