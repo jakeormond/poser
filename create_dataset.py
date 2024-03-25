@@ -6,14 +6,13 @@ from torchvision.io import read_image
 from torch.utils.data import DataLoader
 from sklearn.model_selection import train_test_split
 import matplotlib.pyplot as plt
+import numpy as np
 
 class CustomImageDataset(Dataset):
-    def __init__(self, labels, img_dir, frame_size=700, transform=None, target_transform=None):
+    def __init__(self, annotations, img_dir, transform=None, target_transform=None):
 
-        self.img_labels = labels.iloc[:, 1:].to_numpy()
-        self.img_names = labels.frame
+        self.img_labels = annotations
         self.img_dir = img_dir
-        self.frame_size = frame_size
         self.transform = transform
         self.target_transform = target_transform
 
@@ -21,36 +20,48 @@ class CustomImageDataset(Dataset):
         return len(self.img_labels)
     
     def __getitem__(self, idx):
-        img_path = os.path.join(self.img_dir, self.img_names.iloc[idx])
+        img_path = os.path.join(self.img_dir, self.img_labels.iloc[idx,0])
         image = read_image(img_path)
         image = image/255
-        label = self.img_labels[idx, :]
-        label = torch.tensor(label/self.frame_size)
-        label = label.float()
+
+        label = self.img_labels.iloc[idx, 1:]
+        label = np.array(label).reshape(-1, 2)
         
+        # create a empty set of heatmaps
+        heatmap = torch.zeros((len(label), image.shape[1], image.shape[2]))
+
+        # for each keypoint, create a heatmap and add it to the set of heatmaps
+        for i, keypoint in enumerate(label):
+            x, y = keypoint
+            if np.isnan(x) or np.isnan(y):
+                continue
+            x = int(x)
+            y = int(y)
+            heatmap[i, x, y] = 1
+      
         if self.transform:
             image = self.transform(image)
         if self.target_transform:
-            label = self.target_transform(label)
-        return image, label
+            heatmap = self.target_transform(heatmap)
+        return image, heatmap
     
 if __name__ == '__main__':
 
-    img_dir = '/media/jake/LaCie/2023-05-03/videos/extracted_frames'
-    annotations_file = '/media/jake/LaCie/2023-05-03/videos/extracted_frames/coordinates.csv'
+    img_dir = '/media/jake/LaCie/video_files/extracted_frames'
+    annotations_file = '/media/jake/LaCie/video_files/labelled_frames/coordinates.csv'
     transform = None
     target_transform = None
 
-    labels = pd.read_csv(annotations_file)
+    annotations = pd.read_csv(annotations_file)
 
     # split the data into training, test, and validation sets
-    n = len(labels)
+    n = len(annotations)
 
     train_ratio = 0.7
     validation_ratio = 0.15
     test_ratio = 0.15
 
-    train_labels, test_labels = train_test_split(labels, test_size=1-train_ratio, shuffle=True)
+    train_labels, test_labels = train_test_split(annotations, test_size=1-train_ratio, shuffle=True)
     val_labels, test_labels = train_test_split(test_labels, test_size=test_ratio/(test_ratio + validation_ratio), shuffle=True)
 
 
@@ -74,11 +85,20 @@ if __name__ == '__main__':
     # convert to unint8
     #img = img.astype('uint8')
     plt.imshow(img, cmap="gray")
-    plt.imshow(img)
     plt.show()
 
-    label = train_labels[0]
-    print(f"Label: {label}")
-
+    # Display the label
+    label = train_labels[0].squeeze()
+    
+    # plot the labels over the image
+    plt.imshow(img, cmap="gray")
+    for i in range(label.shape[0]):
+        # get the x and y coordinates of the keypoint
+        y, x = torch.where(label[i] == 1)
+        x = x.numpy()
+        y = y.numpy()
+        # plot the keypoint
+        plt.scatter(y, x, c='r', s=10)
+        
     pass
     
