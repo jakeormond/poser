@@ -3,6 +3,7 @@ import torch.nn as nn
 from torch.optim import Adam, lr_scheduler, SGD
 from torchvision.models import resnet50, ResNet50_Weights
 from torch.utils.data import DataLoader
+from torchvision import transforms
 import pandas as pd
 from sklearn.model_selection import train_test_split
 from create_dataset import CustomImageDataset
@@ -27,16 +28,35 @@ device = (
 # model.fc.add_module('relu', torch.nn.ReLU())
 
 class CustomResNet(torch.nn.Module):
-    def __init__(self, n_outputs=16):
+    def __init__(self, n_outputs=8):
         super(CustomResNet, self).__init__()
-        self.resnet = resnet50(pretrained=True)
+        self.resnet = resnet50(weights=ResNet50_Weights.DEFAULT)
         num_ftrs = self.resnet.fc.in_features
         self.resnet.fc = torch.nn.Linear(num_ftrs, n_outputs)
         self.relu = torch.nn.ReLU()
 
+        # Add a series of deconvolutional layers
+        self.deconv1 = torch.nn.ConvTranspose2d(n_outputs, 64, kernel_size=4, stride=2, padding=1)
+        self.deconv2 = torch.nn.ConvTranspose2d(64, 32, kernel_size=4, stride=2, padding=1)
+        self.deconv3 = torch.nn.ConvTranspose2d(32, 8, kernel_size=4, stride=2, padding=1)
+
+        # Add a sigmoid activation function
+        self.sigmoid = torch.nn.Sigmoid()
+
     def forward(self, x):
         x = self.resnet(x)
         x = self.relu(x)
+
+        # Reshape the output to have 4 dimensions
+        x = x.view(x.shape[0], 16, int(x.shape[1]/16), int(x.shape[1]/16))
+
+        x = self.relu(self.deconv1(x))
+        x = self.relu(self.deconv2(x))
+        x = self.deconv3(x)
+
+        # Apply the sigmoid activation function
+        x = self.sigmoid(x)
+
         return x
 
 # train and test loops
@@ -111,9 +131,34 @@ def model_training(train_dataloader, test_dataloader, loss_fn,
 
 if __name__ == "__main__":
 
-    data_dir = '/media/jake/LaCie/2023-05-03'
+    
+    img_dir = '/media/jake/LaCie/video_files/extracted_frames'
+    annotations_file = '/media/jake/LaCie/video_files/labelled_frames/coordinates.csv'
+    transform = transforms.Compose([transforms.Resize((350, 350))])  # Resize to 350x350
+    target_transform = None
 
-     # Instantiate the model
+    annotations = pd.read_csv(annotations_file)
+
+    # split the data into training, test, and validation sets
+    n = len(annotations)
+
+    train_ratio = 0.7
+    validation_ratio = 0.15
+    test_ratio = 0.15
+
+    train_labels, test_labels = train_test_split(annotations, test_size=1-train_ratio, shuffle=True)
+    val_labels, test_labels = train_test_split(test_labels, test_size=test_ratio/(test_ratio + validation_ratio), shuffle=True)
+
+
+    training_data = CustomImageDataset(train_labels, img_dir, transform=transform, target_transform=target_transform)
+    test_data = CustomImageDataset(test_labels, img_dir, transform=transform, target_transform=target_transform)
+    validation_data = CustomImageDataset(val_labels, img_dir, transform=transform, target_transform=target_transform)
+
+    train_dataloader = DataLoader(training_data, batch_size=1, shuffle=True)
+    test_dataloader = DataLoader(test_data, batch_size=1, shuffle=True)
+    validation_dataloader = DataLoader(validation_data, batch_size=1, shuffle=True)
+
+    # Instantiate the model
     model = CustomResNet()
     model.to(device)
 
@@ -124,26 +169,21 @@ if __name__ == "__main__":
     # scheduler
     step_lr_scheduler = lr_scheduler.StepLR(optimizer, step_size=7, gamma=0.1)
 
-    # create the data loaders
-    img_dir = os.path.join(data_dir, 'videos/extracted_frames')
-    annotations_file = os.path.join(img_dir, coordinates.csv')
-    labels = pd.read_csv(annotations_file)
 
-    train_ratio = 0.7
-    test_ratio = 0.3
+    # send a batch through and check output dimensions
+    model.eval()
+    inputs, _ = next(iter(train_dataloader))
+    inputs = inputs.to(device)
 
-    train_labels, test_labels = train_test_split(labels, test_size=1-train_ratio, shuffle=True)
-    transform = None
-    target_transform = None
-    training_data = CustomImageDataset(train_labels, img_dir, transform=transform, target_transform=target_transform)
-    test_data = CustomImageDataset(test_labels, img_dir, transform=transform, target_transform=target_transform)
+    # Pass the batch through the model
+    outputs = model(inputs)
 
-    batch_size = 16
-    train_dataloader = DataLoader(training_data, batch_size=batch_size, shuffle=True)
-    test_dataloader = DataLoader(test_data, batch_size=batch_size, shuffle=True)
+    # Print the shape of the output
+    print(outputs.shape)
     
-    # instantiate the model
-    model = CustomResNet().to(device)
+
+
+
 
 
     history = model_training(train_dataloader, test_dataloader, loss_fn, 

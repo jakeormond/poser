@@ -3,6 +3,7 @@ import pandas as pd
 import torch
 from torch.utils.data import Dataset
 from torchvision.io import read_image
+from torchvision import transforms
 from torch.utils.data import DataLoader
 from sklearn.model_selection import train_test_split
 import matplotlib.pyplot as plt
@@ -49,7 +50,7 @@ if __name__ == '__main__':
 
     img_dir = '/media/jake/LaCie/video_files/extracted_frames'
     annotations_file = '/media/jake/LaCie/video_files/labelled_frames/coordinates.csv'
-    transform = None
+    transform = transforms.Compose([transforms.Resize((350, 350))])  # Resize to 350x350
     target_transform = None
 
     annotations = pd.read_csv(annotations_file)
@@ -95,8 +96,8 @@ if __name__ == '__main__':
     for i in range(label.shape[0]):
         # get the x and y coordinates of the keypoint
         y, x = torch.where(label[i] == 1)
-        x = x.numpy()
-        y = y.numpy()
+        x = int(x.numpy()/2)
+        y = int(y.numpy()/2)
         # plot the keypoint
         plt.scatter(y, x, c='r', s=10)
         
