@@ -43,8 +43,37 @@ class CustomImageDataset(Dataset):
         if self.transform:
             image = self.transform(image)
         if self.target_transform:
+            
+            # find the max value in each 2d heatmap along the 1 dimension
+            # keypoints_og = get_keypoints(heatmap)
+
             heatmap = self.target_transform(heatmap)
+            
+            # just for testing
+            # keypoints_ds = get_keypoints(heatmap)
+
+            # normalize the heatmaps
+            heatmap = normalize_heatmap(heatmap)
+
         return image, heatmap
+    
+def get_keypoints(heatmap):
+
+    keypoints = []
+    for i in range(heatmap.shape[0]):
+        heatmap_temp = heatmap[i]
+        # find indices of max value
+        x, y = torch.where(heatmap_temp == heatmap_temp.max())
+        keypoints.append((x, y))
+
+    return keypoints
+
+def normalize_heatmap(heatmap):
+    # make the max value in each heatmap 1
+    for i in range(heatmap.shape[0]):
+
+        heatmap[i] = heatmap[i]/heatmap[i].max()
+    return heatmap
     
 if __name__ == '__main__':
 

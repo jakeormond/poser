@@ -1,7 +1,8 @@
 import torch
 import torch.nn as nn
 from torch.optim import Adam, lr_scheduler, SGD
-from torchvision.models import resnet50, ResNet50_Weights
+# from torchvision.models import resnet50, ResNet50_Weights
+from torchvision.models import resnet34, ResNet34_Weights
 from torch.utils.data import DataLoader
 from torchvision import transforms
 import pandas as pd
@@ -28,17 +29,35 @@ device = (
 # model.fc.add_module('relu', torch.nn.ReLU())
 
 class CustomResNet(torch.nn.Module):
-    def __init__(self, n_outputs=8):
+    def __init__(self):
         super(CustomResNet, self).__init__()
-        self.resnet = resnet50(weights=ResNet50_Weights.DEFAULT)
-        num_ftrs = self.resnet.fc.in_features
-        self.resnet.fc = torch.nn.Linear(num_ftrs, n_outputs)
+        full_resnet = resnet34(weights=ResNet34_Weights.DEFAULT)
+        self.resnet = torch.nn.Sequential(*(list(full_resnet.children())[:-2]))
+        # num_ftrs = self.resnet.fc.in_features
+        # self.resnet.fc = torch.nn.Linear(num_ftrs, n_outputs)       
         self.relu = torch.nn.ReLU()
 
-        # Add a series of deconvolutional layers
-        self.deconv1 = torch.nn.ConvTranspose2d(n_outputs, 64, kernel_size=4, stride=2, padding=1)
-        self.deconv2 = torch.nn.ConvTranspose2d(64, 32, kernel_size=4, stride=2, padding=1)
-        self.deconv3 = torch.nn.ConvTranspose2d(32, 8, kernel_size=4, stride=2, padding=1)
+        # get number of outputs from the resnet model
+        # Get the last convolutional layer in the Sequential object
+        # last_conv_layer = next(layer for layer in reversed(list(self.resnet.children())) 
+        #                        if isinstance(layer, torch.nn.modules.conv.Conv2d))
+
+        # Get the number of output channels
+        # n_outputs = last_conv_layer.out_channels
+
+
+        # Add a series of deconvolutional layers with BatchNorm and ReLU activations
+        
+        # self.deconv1 = torch.nn.ConvTranspose2d(2048, 256, kernel_size=4, stride=2, padding=1)
+        self.deconv1 = torch.nn.ConvTranspose2d(512, 256, kernel_size=4, stride=2, padding=1)
+        
+        
+        self.deconv2plus = torch.nn.ConvTranspose2d(256, 256, kernel_size=4, stride=2, padding=1)
+        self.deconv_final = torch.nn.ConvTranspose2d(256, 256, kernel_size=4, stride=2, padding=2)
+
+        self.batchnorm = torch.nn.BatchNorm2d(256)
+
+        self.final_conv = torch.nn.Conv2d(256, 8, kernel_size=1, stride=1, padding=0)
 
         # Add a sigmoid activation function
         self.sigmoid = torch.nn.Sigmoid()
@@ -47,12 +66,15 @@ class CustomResNet(torch.nn.Module):
         x = self.resnet(x)
         x = self.relu(x)
 
-        # Reshape the output to have 4 dimensions
-        x = x.view(x.shape[0], 16, int(x.shape[1]/16), int(x.shape[1]/16))
+        # Apply the deconvolutional layers
+        x = self.relu(self.batchnorm(self.deconv1(x)))       
+        x = self.relu(self.batchnorm(self.deconv2plus(x)))
+        x = self.relu(self.batchnorm(self.deconv2plus(x)))
+        x = self.relu(self.batchnorm(self.deconv2plus(x)))
+        x = self.relu(self.batchnorm(self.deconv_final(x)))
 
-        x = self.relu(self.deconv1(x))
-        x = self.relu(self.deconv2(x))
-        x = self.deconv3(x)
+        # Apply the final convolutional layer
+        x = self.final_conv(x)
 
         # Apply the sigmoid activation function
         x = self.sigmoid(x)
@@ -134,8 +156,9 @@ if __name__ == "__main__":
     
     img_dir = '/media/jake/LaCie/video_files/extracted_frames'
     annotations_file = '/media/jake/LaCie/video_files/labelled_frames/coordinates.csv'
-    transform = transforms.Compose([transforms.Resize((350, 350))])  # Resize to 350x350
-    target_transform = None
+    transform = transforms.Compose([transforms.Resize((126, 126))])  # Resize to 350x350
+    target_transform = transforms.Compose([transforms.Resize((126, 126))])  # Resize to 350x350
+    # target_transform = None
 
     annotations = pd.read_csv(annotations_file)
 
@@ -172,20 +195,14 @@ if __name__ == "__main__":
 
     # send a batch through and check output dimensions
     model.eval()
-    inputs, _ = next(iter(train_dataloader))
+    inputs, labels = next(iter(train_dataloader))
     inputs = inputs.to(device)
 
     # Pass the batch through the model
     outputs = model(inputs)
-
-    # Print the shape of the output
     print(outputs.shape)
     
-
-
-
-
-
+    # 
     history = model_training(train_dataloader, test_dataloader, loss_fn, 
                    model, optimizer, device, step_lr_scheduler, n_epochs=10)
 
