@@ -3,19 +3,31 @@ import pandas as pd
 import torch
 from torch.utils.data import Dataset
 from torchvision.io import read_image
-from torchvision import transforms
+
+import torchvision.transforms.v2 as transforms
+
+# We are using BETA APIs, so we deactivate the associated warning, thereby acknowledging that
+# some APIs may slightly change in the future
+import torchvision
+torchvision.disable_beta_transforms_warning()
+
+
 from torch.utils.data import DataLoader
 from sklearn.model_selection import train_test_split
 import matplotlib.pyplot as plt
 import numpy as np
 
 class CustomImageDataset(Dataset):
-    def __init__(self, annotations, img_dir, transform=None, target_transform=None):
+    def __init__(self, annotations, img_dir, sigma=None, transform=None):
 
         self.img_labels = annotations
         self.img_dir = img_dir
         self.transform = transform
-        self.target_transform = target_transform
+
+        if sigma is None:
+            self.sigma = 100
+        else:
+            self.sigma = sigma
 
     def __len__(self):
         return len(self.img_labels)
@@ -25,6 +37,10 @@ class CustomImageDataset(Dataset):
         image = read_image(img_path)
         image = image/255
 
+        # fig = plt.figure()
+        # image_for_plot = image.permute(1, 2, 0)
+        # plt.imshow(image_for_plot)
+        
         label = self.img_labels.iloc[idx, 1:]
         label = np.array(label).reshape(-1, 2)
         
@@ -37,42 +53,56 @@ class CustomImageDataset(Dataset):
             if np.isnan(x) or np.isnan(y):
                 continue
             x = int(x)
-            y = int(y)
-            heatmap[i, x, y] = 1
-      
-        if self.transform:
-            image = self.transform(image)
-        if self.target_transform:
-            
-            # find the max value in each 2d heatmap along the 1 dimension
-            # keypoints_og = get_keypoints(heatmap)
+            y = int(y) 
+            heatmap[i,:,:] = apply_gaussian(heatmap[i,:,:], y, x, self.sigma)
 
-            heatmap = self.target_transform(heatmap)
-            
+      
+        if self.transform:    
+            # concatenate image and heatmap, transform, and then split them
+            image = torch.cat((image, heatmap), dim=0)
+            image = self.transform(image)
+            image, heatmap = torch.split(image, [3, len(label)], dim=0)
+                    
             # just for testing
             # keypoints_ds = get_keypoints(heatmap)
 
             # normalize the heatmaps
             heatmap = normalize_heatmap(heatmap)
 
+            # plot image and heatmaps
+            # fig, ax = plt.subplots(1,2, figsize=(10,5))
+            # image_for_plot = image.permute(1, 2, 0)
+            # ax[0].imshow(image_for_plot)
+
+            # for i in range(heatmap.shape[0]):
+            #     # get the x and y coordinates of the keypoint
+            #     y, x = torch.where(heatmap[i] == 1)
+            #     if x.numel() == 0:
+            #         continue
+            #     x = int(x.numpy())
+            #     y = int(y.numpy())
+            #     # plot the keypoint
+            #     ax[0].scatter(x, y, c='r', s=10)
+
+            # # sum the heatmaps to get a single heatmap
+            # heatmap_sum = heatmap.sum(dim=0)
+            # ax[1].imshow(heatmap_sum)
+
         return image, heatmap
-    
-def get_keypoints(heatmap):
+ 
 
-    keypoints = []
-    for i in range(heatmap.shape[0]):
-        heatmap_temp = heatmap[i]
-        # find indices of max value
-        x, y = torch.where(heatmap_temp == heatmap_temp.max())
-        keypoints.append((x, y))
+def apply_gaussian(heatmap, y, x, sigma):
+    grid_y, grid_x = np.ogrid[0:heatmap.shape[0], 0:heatmap.shape[1]]
+    gaussian = np.exp(-((grid_x-x)**2 + (grid_y-y)**2) / (2.*sigma**2))
+    heatmap += gaussian
+    return heatmap
 
-    return keypoints
-
+  
 def normalize_heatmap(heatmap):
     # make the max value in each heatmap 1
     for i in range(heatmap.shape[0]):
-
-        heatmap[i] = heatmap[i]/heatmap[i].max()
+        if heatmap[i].max() != 0:
+            heatmap[i] = 2*(heatmap[i]/heatmap[i].max())
     return heatmap
     
 if __name__ == '__main__':
@@ -80,7 +110,7 @@ if __name__ == '__main__':
     img_dir = '/media/jake/LaCie/video_files/extracted_frames'
     annotations_file = '/media/jake/LaCie/video_files/labelled_frames/coordinates.csv'
     transform = transforms.Compose([transforms.Resize((350, 350))])  # Resize to 350x350
-    target_transform = None
+    target_transform = transforms.Compose([transforms.Resize((350, 350))])
 
     annotations = pd.read_csv(annotations_file)
 
@@ -119,6 +149,8 @@ if __name__ == '__main__':
 
     # Display the label
     label = train_labels[0].squeeze()
+    # transpose the label
+    label = label.permute(0,2,1)
     
     # plot the labels over the image
     plt.imshow(img, cmap="gray")
@@ -128,7 +160,7 @@ if __name__ == '__main__':
         x = int(x.numpy()/2)
         y = int(y.numpy()/2)
         # plot the keypoint
-        plt.scatter(y, x, c='r', s=10)
+        plt.scatter(x, y, c='r', s=10)
         
     pass
     

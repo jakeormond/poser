@@ -3,7 +3,6 @@ import torch.nn as nn
 from torch.optim import Adam, lr_scheduler, SGD
 from torchvision.models import resnet50, ResNet50_Weights
 from torchvision.models import resnet34, ResNet34_Weights
-import torchvision.transforms.v2 as transforms_v2
 from torch.utils.data import DataLoader
 from torchvision import transforms
 import pandas as pd
@@ -18,8 +17,6 @@ import datetime
 
 import tkinter as tk
 from tkinter import filedialog
-
-import pickle
 
 
 device = (
@@ -42,7 +39,6 @@ class CustomResNet(torch.nn.Module):
         super(CustomResNet, self).__init__()
         # full_resnet = resnet34(weights=ResNet34_Weights.DEFAULT)
         full_resnet = resnet50(weights=ResNet50_Weights.DEFAULT)
-        # full_resnet = resnet50(weights=None)
         self.resnet = torch.nn.Sequential(*(list(full_resnet.children())[:-2]))
         # num_ftrs = self.resnet.fc.in_features
         # self.resnet.fc = torch.nn.Linear(num_ftrs, n_outputs)       
@@ -128,7 +124,7 @@ class CustomResNet(torch.nn.Module):
         optimizer_path = os.path.join(model_dir, 'optimizer.pt')
         torch.save(optimizer.state_dict(), optimizer_path)
 
-        return model_dir
+        return
     
 
     def dir(self):
@@ -148,6 +144,7 @@ def train_loop(dataloader, model, loss_fn, optimizer, device):
         loss = loss_fn(pred, y.to(device))
 
         # Backpropagation
+                
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
@@ -181,7 +178,7 @@ def test_loop(dataloader, model, loss_fn, device):
 
     return test_loss
 
-def model_training(train_dataloader, test_dataloader, loss_fn, 
+def model_training(train_dataloader, loss_fn, 
                    model, optimizer, device, step_lr_scheduler, n_epochs=10):
     
     # set model to training mode
@@ -195,9 +192,6 @@ def model_training(train_dataloader, test_dataloader, loss_fn,
         print(f"train loss: {train_loss[-1]:>7f}")
         history['train_loss'].append(train_loss)     
 
-        test_loss = test_loop(test_dataloader, model, loss_fn, device)
-        history['test_loss'].append(test_loss)
-        print(f"test loss: {test_loss:>7f}")
         step_lr_scheduler.step()
 
     return history
@@ -246,48 +240,22 @@ def plot_history(history, model_dir):
 
 
 
-def get_dataloaders(annotations_file, transform=None, labels=None, sigma=None, batch_size=8):
+def get_dataloader(annotations_file, ds_size):
 
-    # transform = transforms.Compose([transforms.Resize((ds_size, ds_size))])  
+    transform = transforms.Compose([transforms.Resize((ds_size, ds_size))])  
+    target_transform = transforms.Compose([transforms.Resize((ds_size, ds_size))])  
 
-    if labels is None:
-        annotations = pd.read_csv(annotations_file)
+    annotations = pd.read_csv(annotations_file)
 
-        # split the data into training, test, and validation sets
+    # take a single image and overtrain the model on it
+    training_data = CustomImageDataset(annotations.iloc[[0]], img_dir, transform=transform, target_transform=target_transform)
 
-        train_ratio = 0.7
-        validation_ratio = 0.15
-        test_ratio = 0.15
-
-        train_labels, test_labels = train_test_split(annotations, test_size=1-train_ratio, shuffle=True)
-        val_labels, test_labels = train_test_split(test_labels, test_size=test_ratio/(test_ratio + validation_ratio), shuffle=True)
-
-    else:
-        train_labels = labels['train']
-        test_labels = labels['test']
-        val_labels = labels['validation']
+    batch_size = 1
+    dataloader = DataLoader(training_data, batch_size=batch_size, shuffle=True)
     
-    if sigma is None:   
-        sigma = 100
     
-    training_data = CustomImageDataset(train_labels, img_dir, sigma=sigma, transform=transform)
-    test_data = CustomImageDataset(test_labels, img_dir, sigma=sigma, transform=transform)
-    validation_data = CustomImageDataset(val_labels, img_dir, sigma=sigma, transform=transform)
 
-    train_dataloader = DataLoader(training_data, batch_size=batch_size, shuffle=True)
-    test_dataloader = DataLoader(test_data, batch_size=batch_size, shuffle=True)
-    validation_dataloader = DataLoader(validation_data, batch_size=batch_size, shuffle=True)
-
-    dataloaders = {}
-    dataloaders['train'] = train_dataloader
-    dataloaders['test'] = test_dataloader
-    dataloaders['validation'] = validation_dataloader
-
-    labels = {}
-    labels['train'] = train_labels
-    labels['test'] = test_labels
-    labels['validation'] = val_labels
-    return dataloaders, labels
+    return dataloader
 
 
 if __name__ == "__main__":
@@ -308,84 +276,28 @@ if __name__ == "__main__":
     annotations_file = '/media/jake/LaCie/video_files/labelled_frames/coordinates.csv'
     
     
-    ds_size = 350
-
-    # run groups of epochs with decresing sigmas
-    # sigmas = [100, 85, 70, 60, 50]
-    # sigmas = [20, 18, 15, 12, 9]
-
-    sigmas = [100, 85, 70, 60, 50, 20, 18, 15, 12, 9]
-
-    ds_size = 350
-    transform = transforms_v2.Compose([
-        transforms_v2.Resize((ds_size, ds_size)),
-        transforms_v2.RandomHorizontalFlip(),
-        transforms_v2.RandomRotation(10),
-        transforms_v2.RandomResizedCrop(ds_size),
-        transforms_v2.ToTensor()
-    ])
-
-    # load or initialize the model
+    ds_size = 126
+    dataloader = get_dataloader(annotations_file, ds_size)
+    
+    # Instantiate the model
     model = CustomResNet()
     model.to(device)
 
-    # optimizer = Adam(model.parameters(), lr=0.001)
-    optimizer = SGD(model.parameters(), lr=0.1, momentum=0.9, weight_decay=0.0001)
-
-    load_model = False
+    # loss_fn =  nn.MSELoss()
     
-    history = []
-
-    if load_model:
-        # 
-        import tkinter as tk
-        from tkinter import filedialog
-
-        model_dir_now = filedialog.askdirectory(initialdir=model_dir)
-        model_path = os.path.join(model_dir_now, 'model.pt')
-        model.load_state_dict(torch.load(model_path))
-        
-        optimizer_path = os.path.join(model_dir_now, 'optimizer.pt')
-        optimizer.load_state_dict(torch.load(optimizer_path))
-
-    # loss_fn = nn.MSELoss()
     loss_fn =  JointsMSELoss()
 
-    
-    # optimizer = SGD(model.parameters(), lr=0.001)
+
+
+    optimizer = Adam(model.parameters(), lr=0.001)
+    # optimizer = SGD(model.parameters(), lr=0.01)
     # scheduler
-    # step_lr_scheduler = lr_scheduler.StepLR(optimizer, step_size=5, gamma=.99)
-    step_lr_scheduler = lr_scheduler.MultiStepLR(optimizer, [150], gamma=.1)
-    n_epochs = 40
-    for i, sigma in enumerate(sigmas):
-        if i == 0:  
-            dataloaders, labels = get_dataloaders(annotations_file, transform=transform, sigma=sigmas[i])
-
-        else:
-            dataloaders, _ = get_dataloaders(annotations_file, transform=transform, labels=labels, sigma=sigma)
-            
-        train_dataloader = dataloaders['train']
-        test_dataloader = dataloaders['test']
-        validation_dataloader = dataloaders['validation']        
-        
-        ######################### TRAIN THE MODEL ################################### 
-        # if sigma > 60:
-        #     n_epochs = 30
-
-        # else:
-        #     n_epochs = 15   
-
-        history.append(model_training(train_dataloader, test_dataloader, loss_fn, 
-                    model, optimizer, device, step_lr_scheduler, n_epochs=n_epochs))  
+    step_lr_scheduler = lr_scheduler.StepLR(optimizer, step_size=100, gamma=.9999999)
     
-    
-    ########### SAVE THE MODEL, OPTIMIZER, AND LABELS ############################
-    model_dir = model.save(optimizer, model_dir)   
-    # save the labels dictionary as a pickle file
-    labels_path = os.path.join(model_dir, 'labels.pkl')
-    with open(labels_path, 'wb') as f:
-        pickle.dump(labels, f)
-
+    ######################### TRAIN THE MODEL ################################### 
+    history = model_training(dataloader, loss_fn, 
+                   model, optimizer, device, step_lr_scheduler, n_epochs=100000)
+    model.save(optimizer, model_dir)   
     plot_history(history, model.dir())
 
 
