@@ -89,6 +89,72 @@ class CustomImageDataset(Dataset):
             # ax[1].imshow(heatmap_sum)
 
         return image, heatmap
+    
+
+class DatasetForVideoLabelling(Dataset):
+    def __init__(self, images, transform=None):
+        self.images = images
+        self.transform = transform
+
+    def __len__(self):
+        return len(self.images)
+    
+    def __getitem__(self, idx):
+        image = self.images[idx]
+        image = image/255
+
+        # fig = plt.figure()
+        # image_for_plot = image.permute(1, 2, 0)
+        # plt.imshow(image_for_plot)
+        
+        label = self.img_labels.iloc[idx, 1:]
+        label = np.array(label).reshape(-1, 2)
+        
+        # create a empty set of heatmaps
+        heatmap = torch.zeros((len(label), image.shape[1], image.shape[2]))
+
+        # for each keypoint, create a heatmap and add it to the set of heatmaps
+        for i, keypoint in enumerate(label):
+            x, y = keypoint
+            if np.isnan(x) or np.isnan(y):
+                continue
+            x = int(x)
+            y = int(y) 
+            heatmap[i,:,:] = apply_gaussian(heatmap[i,:,:], y, x, self.sigma)
+
+      
+        if self.transform:    
+            # concatenate image and heatmap, transform, and then split them
+            image = torch.cat((image, heatmap), dim=0)
+            image = self.transform(image)
+            image, heatmap = torch.split(image, [3, len(label)], dim=0)
+                    
+            # just for testing
+            # keypoints_ds = get_keypoints(heatmap)
+
+            # normalize the heatmaps
+            heatmap = normalize_heatmap(heatmap)
+
+            # plot image and heatmaps
+            # fig, ax = plt.subplots(1,2, figsize=(10,5))
+            # image_for_plot = image.permute(1, 2, 0)
+            # ax[0].imshow(image_for_plot)
+
+            # for i in range(heatmap.shape[0]):
+            #     # get the x and y coordinates of the keypoint
+            #     y, x = torch.where(heatmap[i] == 1)
+            #     if x.numel() == 0:
+            #         continue
+            #     x = int(x.numpy())
+            #     y = int(y.numpy())
+            #     # plot the keypoint
+            #     ax[0].scatter(x, y, c='r', s=10)
+
+            # # sum the heatmaps to get a single heatmap
+            # heatmap_sum = heatmap.sum(dim=0)
+            # ax[1].imshow(heatmap_sum)
+
+        return image, heatmap
  
 
 def apply_gaussian(heatmap, y, x, sigma):

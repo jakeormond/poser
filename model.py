@@ -21,6 +21,8 @@ from tkinter import filedialog
 
 import pickle
 
+import numpy as np
+
 
 device = (
         "cuda"
@@ -224,16 +226,40 @@ def plot_history(history, model_dir):
 
     fig_path = os.path.join(model_dir, 'losses.png')
 
-    _, ax = plt.subplots(1, 2)
-    ax[0].plot(history['train_loss'])
-    ax[0].set_xlabel('Epochs')
-    ax[0].set_ylabel('Loss')
-    ax[0].set_title('Training Loss')
+    train_loss = []
+    test_loss = []
 
-    ax[1].plot(history['test_loss'])
-    ax[1].set_xlabel('Epochs')
-    ax[1].set_ylabel('Loss')
-    ax[1].set_title('Test Loss')
+    for i in range(len(history)):
+        for e in range(len(history[i]['test_loss'])):
+            test_loss.append(history[i]['test_loss'][e])
+
+            train_loss_temp = []
+            for b in range(len(history[i]['train_loss'][e])):
+                train_loss_temp.append(np.mean(history[i]['train_loss'][e][b]))
+        
+            train_loss.append(np.mean(train_loss_temp))
+    
+    # create figure with 2 subplots
+    fig, ax = plt.subplots(1, 2, figsize=(20, 5))
+
+    # add title
+    fig.suptitle('Training and Test Losses')
+    
+    # plot the training and test losses in first subplot
+    ax[0].plot(train_loss, label='train loss')
+    ax[0].plot(test_loss, label='test loss')
+
+    # add labels
+    plt.xlabel('Epoch')
+    plt.ylabel('Loss')
+
+    # in second subplot, plot from the 201 epoch on
+    ax[1].plot(train_loss[200:], label='train loss')
+    ax[1].plot(test_loss[200:], label='test loss')
+
+    # add labels
+    plt.xlabel('Epoch')
+    plt.ylabel('Loss')
 
     plt.show()  
 
@@ -356,7 +382,7 @@ if __name__ == "__main__":
     # scheduler
     # step_lr_scheduler = lr_scheduler.StepLR(optimizer, step_size=5, gamma=.99)
     step_lr_scheduler = lr_scheduler.MultiStepLR(optimizer, [150], gamma=.1)
-    n_epochs = 40
+    n_epochs = 20
     for i, sigma in enumerate(sigmas):
         if i == 0:  
             dataloaders, labels = get_dataloaders(annotations_file, transform=transform, sigma=sigmas[i])
@@ -385,6 +411,11 @@ if __name__ == "__main__":
     labels_path = os.path.join(model_dir, 'labels.pkl')
     with open(labels_path, 'wb') as f:
         pickle.dump(labels, f)
+
+    # save the history
+    history_path = os.path.join(model_dir, 'history.pkl')
+    with open(history_path, 'wb') as f:
+        pickle.dump(history, f)
 
     plot_history(history, model.dir())
 
