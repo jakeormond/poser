@@ -40,7 +40,7 @@ device = (
 # model.fc.add_module('relu', torch.nn.ReLU())
 
 class CustomResNet(torch.nn.Module):
-    def __init__(self):
+    def __init__(self, n_outputs):
         super(CustomResNet, self).__init__()
         # full_resnet = resnet34(weights=ResNet34_Weights.DEFAULT)
         full_resnet = resnet50(weights=ResNet50_Weights.DEFAULT)
@@ -70,7 +70,7 @@ class CustomResNet(torch.nn.Module):
 
         self.batchnorm = torch.nn.BatchNorm2d(256)
 
-        self.final_conv = torch.nn.Conv2d(256, 8, kernel_size=1, stride=1, padding=0)
+        self.final_conv = torch.nn.Conv2d(256, n_outputs, kernel_size=1, stride=1, padding=0)
 
         # Add a sigmoid activation function
         self.sigmoid = torch.nn.Sigmoid()
@@ -147,6 +147,10 @@ def train_loop(dataloader, model, loss_fn, optimizer, device):
     for batch, (X, y) in enumerate(dataloader):
         # Compute prediction and loss
         pred = model(X.to(device))
+
+        # plt.imshow(np.transpose(y[0].detach().cpu().numpy(), (1, 2, 0)))
+        # plt.imshow(np.transpose(pred[0].detach().cpu().numpy(), (1, 2, 0)))
+
         loss = loss_fn(pred, y.to(device))
 
         # Backpropagation
@@ -222,9 +226,7 @@ def check_output_dimensions(model, dataloader):
     return 
 
 
-def plot_history(history, model_dir):
-
-    fig_path = os.path.join(model_dir, 'losses.png')
+def plot_history(history, model_dir=None):
 
     train_loss = []
     test_loss = []
@@ -263,8 +265,9 @@ def plot_history(history, model_dir):
 
     plt.show()  
 
-    # save fig
-    plt.savefig(fig_path)  
+    if model_dir is not None:
+        fig_path = os.path.join(model_dir, 'losses.png')
+        plt.savefig(fig_path)  
 
     return
 
@@ -272,7 +275,7 @@ def plot_history(history, model_dir):
 
 
 
-def get_dataloaders(annotations_file, transform=None, labels=None, sigma=None, batch_size=8):
+def get_dataloaders(annotations_file, transform=None, labels=None, keypoints=None, sigma=None, batch_size=8):
 
     # transform = transforms.Compose([transforms.Resize((ds_size, ds_size))])  
 
@@ -296,9 +299,9 @@ def get_dataloaders(annotations_file, transform=None, labels=None, sigma=None, b
     if sigma is None:   
         sigma = 100
     
-    training_data = CustomImageDataset(train_labels, img_dir, sigma=sigma, transform=transform)
-    test_data = CustomImageDataset(test_labels, img_dir, sigma=sigma, transform=transform)
-    validation_data = CustomImageDataset(val_labels, img_dir, sigma=sigma, transform=transform)
+    training_data = CustomImageDataset(train_labels, img_dir, keypoints=keypoints, sigma=sigma, transform=transform)
+    test_data = CustomImageDataset(test_labels, img_dir, keypoints=keypoints, sigma=sigma, transform=transform)
+    validation_data = CustomImageDataset(val_labels, img_dir, keypoints=keypoints, sigma=sigma, transform=transform)
 
     train_dataloader = DataLoader(training_data, batch_size=batch_size, shuffle=True)
     test_dataloader = DataLoader(test_data, batch_size=batch_size, shuffle=True)
@@ -318,6 +321,8 @@ def get_dataloaders(annotations_file, transform=None, labels=None, sigma=None, b
 
 if __name__ == "__main__":
 
+    load_model = False
+
     data_dir = '/media/jake/LaCie/video_files'
 
     # if model dir doesn't exist, create it
@@ -332,6 +337,8 @@ if __name__ == "__main__":
 
     img_dir = '/media/jake/LaCie/video_files/extracted_frames'
     annotations_file = '/media/jake/LaCie/video_files/labelled_frames/coordinates.csv'
+
+    keypoints = ['tailbase']
     
     
     ds_size = 350
@@ -340,7 +347,9 @@ if __name__ == "__main__":
     # sigmas = [100, 85, 70, 60, 50]
     # sigmas = [20, 18, 15, 12, 9]
 
-    sigmas = [100, 85, 70, 60, 50, 20, 18, 15, 12, 9]
+    # sigmas = [100, 85, 70, 60, 50, 20, 18, 15, 12, 9]
+    # sigmas = [8, 7, 6, 5, 4, 3, 2, 1]
+    sigmas = [50]
 
     ds_size = 350
     transform = transforms_v2.Compose([
@@ -352,14 +361,14 @@ if __name__ == "__main__":
     ])
 
     # load or initialize the model
-    model = CustomResNet()
+    n_outputs = len(keypoints)
+    model = CustomResNet(n_outputs)
     model.to(device)
 
     # optimizer = Adam(model.parameters(), lr=0.001)
-    optimizer = SGD(model.parameters(), lr=0.1, momentum=0.9, weight_decay=0.0001)
-
-    load_model = False
-    
+    optimizer = SGD(model.parameters(), lr=0.05, momentum=0.9, weight_decay=0.0001)
+    # optimizer = SGD(model.parameters(), lr=0.01, momentum=0.9, weight_decay=0.0001)
+   
     history = []
 
     if load_model:
@@ -374,6 +383,20 @@ if __name__ == "__main__":
         optimizer_path = os.path.join(model_dir_now, 'optimizer.pt')
         optimizer.load_state_dict(torch.load(optimizer_path))
 
+        # load the labels dictionary as a pickle file
+        labels_path = os.path.join(model_dir_now, 'labels.pkl')
+        with open(labels_path, 'rb') as f:
+            labels = pickle.load(f)
+
+        # load the history as a pickle file
+        history_path = os.path.join(model_dir_now, 'history.pkl')
+        with open(history_path, 'rb') as f:
+            history = pickle.load(f)
+        
+        # plot the history
+        plot_history(history, model_dir_now)
+
+
     # loss_fn = nn.MSELoss()
     loss_fn =  JointsMSELoss()
 
@@ -381,14 +404,14 @@ if __name__ == "__main__":
     # optimizer = SGD(model.parameters(), lr=0.001)
     # scheduler
     # step_lr_scheduler = lr_scheduler.StepLR(optimizer, step_size=5, gamma=.99)
-    step_lr_scheduler = lr_scheduler.MultiStepLR(optimizer, [150], gamma=.1)
-    n_epochs = 20
+    step_lr_scheduler = lr_scheduler.MultiStepLR(optimizer, [50], gamma=.1)
+    n_epochs = 200
     for i, sigma in enumerate(sigmas):
-        if i == 0:  
-            dataloaders, labels = get_dataloaders(annotations_file, transform=transform, sigma=sigmas[i])
+        if i == 0 and not load_model: 
+            dataloaders, labels = get_dataloaders(annotations_file, transform=transform, keypoints=keypoints, sigma=sigma)
 
         else:
-            dataloaders, _ = get_dataloaders(annotations_file, transform=transform, labels=labels, sigma=sigma)
+            dataloaders, _ = get_dataloaders(annotations_file, transform=transform, keypoints=keypoints, labels=labels, sigma=sigma)
             
         train_dataloader = dataloaders['train']
         test_dataloader = dataloaders['test']

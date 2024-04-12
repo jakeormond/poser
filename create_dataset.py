@@ -18,9 +18,19 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 class CustomImageDataset(Dataset):
-    def __init__(self, annotations, img_dir, sigma=None, transform=None):
+    def __init__(self, annotations, img_dir, keypoints=None, sigma=None, transform=None):
 
         self.img_labels = annotations
+
+        if  keypoints is None:
+            # get column names
+            keypoints_xy = self.img_labels.columns[1:]
+            # keep only the names that end with _x and remove the _x
+            self.keypoints = [name[:-2] for name in keypoints_xy if name[-2:] == '_x']
+        # keep only the names that are in the keypoints list
+        else:
+            self.keypoints = keypoints
+
         self.img_dir = img_dir
         self.transform = transform
 
@@ -40,11 +50,17 @@ class CustomImageDataset(Dataset):
         # fig = plt.figure()
         # image_for_plot = image.permute(1, 2, 0)
         # plt.imshow(image_for_plot)
+
+        label_ind =[]
+        for keypoint in self.keypoints:
+            label_ind.append(self.img_labels.columns.get_loc(keypoint + '_x'))
+            label_ind.append(self.img_labels.columns.get_loc(keypoint + '_y'))
+
         
-        label = self.img_labels.iloc[idx, 1:]
+        label = self.img_labels.iloc[idx, label_ind]
         label = np.array(label).reshape(-1, 2)
         
-        # create a empty set of heatmaps
+        # create an empty set of heatmaps
         heatmap = torch.zeros((len(label), image.shape[1], image.shape[2]))
 
         # for each keypoint, create a heatmap and add it to the set of heatmaps
@@ -191,9 +207,9 @@ if __name__ == '__main__':
     val_labels, test_labels = train_test_split(test_labels, test_size=test_ratio/(test_ratio + validation_ratio), shuffle=True)
 
 
-    training_data = CustomImageDataset(train_labels, img_dir, transform=transform, target_transform=target_transform)
-    test_data = CustomImageDataset(test_labels, img_dir, transform=transform, target_transform=target_transform)
-    validation_data = CustomImageDataset(val_labels, img_dir, transform=transform, target_transform=target_transform)
+    training_data = CustomImageDataset(train_labels, img_dir, keypoints=['tailbase'], transform=transform)
+    test_data = CustomImageDataset(test_labels, img_dir, keypoints=['tailbase'], transform=transform)
+    validation_data = CustomImageDataset(val_labels, img_dir, keypoints=['tailbase'], transform=transform)
 
     train_dataloader = DataLoader(training_data, batch_size=16, shuffle=True)
     test_dataloader = DataLoader(test_data, batch_size=16, shuffle=True)
