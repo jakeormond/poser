@@ -173,6 +173,50 @@ class DatasetForVideoLabelling(Dataset):
         return image, heatmap
  
 
+def get_dataloaders(annotations_file, img_dir, transform=None, labels=None, keypoints=None, sigma=None, batch_size=8):
+
+    # transform = transforms.Compose([transforms.Resize((ds_size, ds_size))])  
+
+    if labels is None:
+        annotations = pd.read_csv(annotations_file)
+
+        # split the data into training, test, and validation sets
+
+        train_ratio = 0.7
+        validation_ratio = 0.15
+        test_ratio = 0.15
+
+        train_labels, test_labels = train_test_split(annotations, test_size=1-train_ratio, shuffle=True)
+        val_labels, test_labels = train_test_split(test_labels, test_size=test_ratio/(test_ratio + validation_ratio), shuffle=True)
+
+    else:
+        train_labels = labels['train']
+        test_labels = labels['test']
+        val_labels = labels['validation']
+    
+    if sigma is None:   
+        sigma = 100
+    
+    training_data = CustomImageDataset(train_labels, img_dir, keypoints=keypoints, sigma=sigma, transform=transform)
+    test_data = CustomImageDataset(test_labels, img_dir, keypoints=keypoints, sigma=sigma, transform=transform)
+    validation_data = CustomImageDataset(val_labels, img_dir, keypoints=keypoints, sigma=sigma, transform=transform)
+
+    train_dataloader = DataLoader(training_data, batch_size=batch_size, shuffle=True)
+    test_dataloader = DataLoader(test_data, batch_size=batch_size, shuffle=True)
+    validation_dataloader = DataLoader(validation_data, batch_size=batch_size, shuffle=True)
+
+    dataloaders = {}
+    dataloaders['train'] = train_dataloader
+    dataloaders['test'] = test_dataloader
+    dataloaders['validation'] = validation_dataloader
+
+    labels = {}
+    labels['train'] = train_labels
+    labels['test'] = test_labels
+    labels['validation'] = val_labels
+    return dataloaders, labels
+
+
 def apply_gaussian(heatmap, y, x, sigma):
     grid_y, grid_x = np.ogrid[0:heatmap.shape[0], 0:heatmap.shape[1]]
     gaussian = np.exp(-((grid_x-x)**2 + (grid_y-y)**2) / (2.*sigma**2))

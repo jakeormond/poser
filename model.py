@@ -188,7 +188,7 @@ def test_loop(dataloader, model, loss_fn, device):
     return test_loss
 
 def model_training(train_dataloader, test_dataloader, loss_fn, 
-                   model, optimizer, device, step_lr_scheduler, n_epochs=10):
+                   model, optimizer, device, step_lr_scheduler=None, n_epochs=10):
     
     # set model to training mode
     model.train()
@@ -204,7 +204,9 @@ def model_training(train_dataloader, test_dataloader, loss_fn,
         test_loss = test_loop(test_dataloader, model, loss_fn, device)
         history['test_loss'].append(test_loss)
         print(f"test loss: {test_loss:>7f}")
-        step_lr_scheduler.step()
+
+        if step_lr_scheduler is not None:
+            step_lr_scheduler.step()
 
     return history
 
@@ -226,7 +228,7 @@ def check_output_dimensions(model, dataloader):
     return 
 
 
-def plot_history(history, model_dir=None):
+def plot_history_v1(history, model_dir=None):
 
     train_loss = []
     test_loss = []
@@ -273,50 +275,48 @@ def plot_history(history, model_dir=None):
 
 
 
+def plot_history(history, model_dir=None):
 
+    train_loss = []
+    test_loss = []
 
-def get_dataloaders(annotations_file, transform=None, labels=None, keypoints=None, sigma=None, batch_size=8):
-
-    # transform = transforms.Compose([transforms.Resize((ds_size, ds_size))])  
-
-    if labels is None:
-        annotations = pd.read_csv(annotations_file)
-
-        # split the data into training, test, and validation sets
-
-        train_ratio = 0.7
-        validation_ratio = 0.15
-        test_ratio = 0.15
-
-        train_labels, test_labels = train_test_split(annotations, test_size=1-train_ratio, shuffle=True)
-        val_labels, test_labels = train_test_split(test_labels, test_size=test_ratio/(test_ratio + validation_ratio), shuffle=True)
-
-    else:
-        train_labels = labels['train']
-        test_labels = labels['test']
-        val_labels = labels['validation']
     
-    if sigma is None:   
-        sigma = 100
+    for e in range(len(history['test_loss'])):
+        test_loss.append(history['test_loss'][e])
+
+        train_loss_temp = []
+        for b in range(len(history['train_loss'][e])):
+            train_loss_temp.append(np.mean(history['train_loss'][e][b]))
     
-    training_data = CustomImageDataset(train_labels, img_dir, keypoints=keypoints, sigma=sigma, transform=transform)
-    test_data = CustomImageDataset(test_labels, img_dir, keypoints=keypoints, sigma=sigma, transform=transform)
-    validation_data = CustomImageDataset(val_labels, img_dir, keypoints=keypoints, sigma=sigma, transform=transform)
+        train_loss.append(np.mean(train_loss_temp))
+    
+    # create figure with 2 subplots
+    fig, ax = plt.subplots(1, 1, figsize=(10, 5))
 
-    train_dataloader = DataLoader(training_data, batch_size=batch_size, shuffle=True)
-    test_dataloader = DataLoader(test_data, batch_size=batch_size, shuffle=True)
-    validation_dataloader = DataLoader(validation_data, batch_size=batch_size, shuffle=True)
+    # add title
+    fig.suptitle('Training and Test Losses')
+    
+    # plot the training and test losses in first subplot
+    ax.plot(train_loss, label='train loss')
+    ax.plot(test_loss, label='test loss')
 
-    dataloaders = {}
-    dataloaders['train'] = train_dataloader
-    dataloaders['test'] = test_dataloader
-    dataloaders['validation'] = validation_dataloader
+    # add labels
+    plt.xlabel('Epoch')
+    plt.ylabel('Loss')
 
-    labels = {}
-    labels['train'] = train_labels
-    labels['test'] = test_labels
-    labels['validation'] = val_labels
-    return dataloaders, labels
+    plt.show()  
+
+    if model_dir is not None:
+        fig_path = os.path.join(model_dir, 'losses.png')
+        plt.savefig(fig_path)  
+
+    return
+
+
+def create_curr_model_dir(model_dir):
+    now = datetime.datetime.now()
+    now = now.strftime("%Y-%m-%d_%H-%M-%S")
+    return os.path.join(model_dir, now)
 
 
 if __name__ == "__main__":
@@ -331,9 +331,7 @@ if __name__ == "__main__":
         os.makedirs(model_dir)
 
     # create another folder in the models folder with the date and time
-    now = datetime.datetime.now()
-    now = now.strftime("%Y-%m-%d_%H-%M-%S")
-    model_dir_now = os.path.join(model_dir, now)
+    model_dir_now = create_curr_model_dir(model_dir)  
 
     img_dir = '/media/jake/LaCie/video_files/extracted_frames'
     annotations_file = '/media/jake/LaCie/video_files/labelled_frames/coordinates.csv'
@@ -406,12 +404,15 @@ if __name__ == "__main__":
     # step_lr_scheduler = lr_scheduler.StepLR(optimizer, step_size=5, gamma=.99)
     step_lr_scheduler = lr_scheduler.MultiStepLR(optimizer, [50], gamma=.1)
     n_epochs = 200
+    batch_size = 8
     for i, sigma in enumerate(sigmas):
         if i == 0 and not load_model: 
-            dataloaders, labels = get_dataloaders(annotations_file, transform=transform, keypoints=keypoints, sigma=sigma)
+            dataloaders, labels = get_dataloaders(annotations_file, \
+                    transform=transform, keypoints=keypoints, sigma=sigma, batch_size=8)
 
         else:
-            dataloaders, _ = get_dataloaders(annotations_file, transform=transform, keypoints=keypoints, labels=labels, sigma=sigma)
+            dataloaders, _ = get_dataloaders(annotations_file, \
+                    transform=transform, keypoints=keypoints, labels=labels, sigma=sigma, batch_size=8)
             
         train_dataloader = dataloaders['train']
         test_dataloader = dataloaders['test']
